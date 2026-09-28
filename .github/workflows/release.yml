@@ -22,7 +22,21 @@ jobs:
 
       - run: npm ci
 
-      - name: Build installer and publish to GitHub Releases
-        run: npm run release
+      - name: Build installer
+        run: npm run dist
+
+      - name: List build output
+        run: Get-ChildItem dist | Select-Object Name, Length
+        shell: pwsh
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RestoPrime ${{ github.ref_name }}
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
