@@ -232,7 +232,7 @@ const VIEWS = {
   orders: { title: 'الطلبات', icon: '📋', render: renderOrders },
   menu: { title: 'قائمة الطعام', icon: '📖', render: renderMenu },
   inventory: { title: 'المخزون', icon: '📦', render: renderInventory },
-  expenses: { title: 'المصاريف', icon: '💸', render: renderExpenses },
+  cashbox: { title: 'الصندوق', icon: '🏦', render: renderCashbox },
   reports: { title: 'التقارير', icon: '📈', render: renderReports },
   settings: { title: 'الإعدادات', icon: '⚙️', render: renderSettings },
 };
@@ -296,6 +296,7 @@ function renderDashboard() {
     ${statCard('📐', 'b', 'متوسط قيمة الطلب', money(paidToday.length ? sales / paidToday.length : 0))}
     ${statCard('⏳', 'y', 'طلبات مفتوحة', open.length)}
     ${statCard('🪑', 'b', 'طاولات مشغولة', `${busyTables} / ${S.tables.length}`)}
+    ${statCard('🏦', 'y', 'صافي الصندوق اليوم', money(sales - expToday))}
     ${statCard('💸', 'r', 'مصاريف اليوم', money(expToday))}
   </div>
   <div class="grid cols-2 mb">
@@ -1067,14 +1068,42 @@ function saveAdjust(id) {
    المصاريف
    ========================================================= */
 let expMonth = todayKey().slice(0, 7);
-function renderExpenses() {
-  const list = S.expenses.filter(e => !expMonth || e.date.startsWith(expMonth)).sort((a, b) => b.date.localeCompare(a.date));
-  const total = sum(list, e => e.amount);
-  const byCat = {};
-  list.forEach(e => { byCat[e.category] = (byCat[e.category] || 0) + e.amount; });
+function cashboxData(month) {
+  const inMonth = k => !month || k.startsWith(month);
+  const paid = S.orders.filter(o => o.status === 'paid' && inMonth(dayKey(o.paidAt)));
+  const exps = S.expenses.filter(e => inMonth(e.date));
+  let cash = 0, card = 0;
+  paid.forEach(o => { const t = orderTotals(o).total; if ((o.payment?.method || 'cash') === 'card') card += t; else cash += t; });
+  const income = cash + card;
+  const expenses = sum(exps, e => e.amount);
+  // تجميع يومي
+  const days = {};
+  const day = k => days[k] || (days[k] = { date: k, income: 0, orders: 0, expenses: 0 });
+  paid.forEach(o => { const d = day(dayKey(o.paidAt)); d.income += orderTotals(o).total; d.orders++; });
+  exps.forEach(e => { day(e.date).expenses += e.amount; });
+  const daily = Object.values(days).sort((a, b) => b.date.localeCompare(a.date));
+  return { paid, exps, cash, card, income, expenses, net: income - expenses, cashNet: cash - expenses, daily };
+}
+function renderCashbox() {
+  const d = cashboxData(expMonth);
+  const list = [...d.exps].sort((a, b) => b.date.localeCompare(a.date));
+  const periodLabel = expMonth ? `شهر ${expMonth}` : 'كل الفترات';
   return `
   <div class="card mb">
-    <div class="card-head"><h2>إضافة مصروف</h2></div>
+    <div class="card-head"><h2>🏦 الصندوق — ${periodLabel}</h2>
+      <div class="row"><input type="month" value="${expMonth}" onchange="expMonth=this.value;render()" style="width:auto">
+      <button class="btn sm" onclick="expMonth='';render()">الكل</button></div></div>
+    <div class="grid stats">
+      ${statCard('💰', 'g', 'إجمالي المداخيل', money(d.income))}
+      ${statCard('💵', 'g', 'منها نقداً', money(d.cash))}
+      ${statCard('💳', 'b', 'منها بطاقة', money(d.card))}
+      ${statCard('💸', 'r', 'إجمالي المصاريف', money(d.expenses))}
+      ${statCard('🧮', d.net >= 0 ? 'g' : 'r', 'الإجمالي (الصافي)', money(d.net))}
+      ${statCard('🏦', d.cashNet >= 0 ? 'y' : 'r', 'النقد في الصندوق', money(d.cashNet))}
+    </div>
+  </div>
+  <div class="card mb">
+    <div class="card-head"><h2>تسجيل مصروف (خروج من الصندوق)</h2></div>
     <div class="filters" style="margin:0">
       <label>التاريخ<input type="date" id="e-date" value="${todayKey()}"></label>
       <label>الفئة<select id="e-cat">${EXPENSE_CATS.map(c => `<option>${c}</option>`).join('')}</select></label>
@@ -1083,22 +1112,27 @@ function renderExpenses() {
       <button class="btn primary" onclick="addExpense()">＋ إضافة</button>
     </div>
   </div>
-  <div class="grid" style="grid-template-columns:minmax(0,2fr) minmax(0,1fr)">
+  <div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
     <div class="card">
-      <div class="card-head"><h2>المصاريف</h2>
-        <div class="row"><input type="month" value="${expMonth}" onchange="expMonth=this.value;render()" style="width:auto">
-        <button class="btn sm" onclick="expMonth='';render()">الكل</button></div></div>
+      <div class="card-head"><h2>حركة الصندوق اليومية</h2></div>
+      ${d.daily.length ? `<div class="table-wrap"><table class="tbl">
+        <thead><tr><th>التاريخ</th><th>الطلبات</th><th>المداخيل</th><th>المصاريف</th><th>الصافي</th></tr></thead>
+        <tbody>${d.daily.map(r => `<tr><td class="small">${r.date}</td><td class="num">${r.orders}</td>
+          <td class="num" style="color:var(--success)">+ ${money(r.income)}</td>
+          <td class="num" style="color:var(--danger)">− ${money(r.expenses)}</td>
+          <td class="num"><b>${money(r.income - r.expenses)}</b></td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>الإجمالي</td><td class="num">${d.paid.length}</td><td class="num">${money(d.income)}</td><td class="num">${money(d.expenses)}</td><td class="num"><b>${money(d.net)}</b></td></tr></tfoot>
+      </table></div>` : emptyHTML('🏦', 'لا توجد حركات في هذه الفترة')}
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>المصاريف</h2></div>
       ${list.length ? `<div class="table-wrap"><table class="tbl">
         <thead><tr><th>التاريخ</th><th>الفئة</th><th>الوصف</th><th>المبلغ</th><th></th></tr></thead>
         <tbody>${list.map(e => `<tr><td class="small">${e.date}</td><td><span class="pill">${esc(e.category)}</span></td>
           <td>${esc(e.description)}</td><td class="num"><b>${money(e.amount)}</b></td>
           <td class="actions"><button class="icon-btn danger" onclick="deleteExpense('${e.id}')">🗑️</button></td></tr>`).join('')}</tbody>
-        <tfoot><tr><td colspan="3">المجموع</td><td class="num">${money(total)}</td><td></td></tr></tfoot>
+        <tfoot><tr><td colspan="3">المجموع</td><td class="num">${money(d.expenses)}</td><td></td></tr></tfoot>
       </table></div>` : emptyHTML('💸', 'لا توجد مصاريف في هذه الفترة')}
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>حسب الفئة</h2></div>
-      ${hbars(Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: k, value: v, text: money(v) })))}
     </div>
   </div>`;
 }
