@@ -23,7 +23,7 @@ jobs:
       - run: npm ci
 
       - name: Build installer
-        run: npm run dist
+        run: npx electron-builder --win --publish never
 
       - name: List build output
         run: Get-ChildItem dist | Select-Object Name, Length
