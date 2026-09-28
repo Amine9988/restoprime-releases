@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'          # مثال: v1.0.1
+  workflow_dispatch:  # تشغيل يدوي من تبويب Actions عند الحاجة
 
 permissions:
   contents: write     # مطلوب لإنشاء Release ورفع الملفات
