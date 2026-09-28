@@ -12,4 +12,10 @@ contextBridge.exposeInMainWorld('restoprime', {
     ipcRenderer.on(ch, h);
     return () => ipcRenderer.removeListener(ch, h);
   },
+  // الشبكة المحلية
+  net: {
+    get: () => ipcRenderer.invoke('net:get'),
+    set: (cfg) => ipcRenderer.invoke('net:set', cfg),
+    relaunch: () => ipcRenderer.invoke('net:relaunch'),
+  },
 });

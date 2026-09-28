@@ -112,9 +112,99 @@ function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
   catch (e) { toast('تعذّر حفظ البيانات: ' + e.message, 'err'); }
   updateBadges();
+  Sync.push();
 }
 
 let S = loadState();
+
+/* ---------- المزامنة عبر الشبكة المحلية ---------- */
+const Sync = {
+  url: null, rev: 0, enabled: false, online: false, mode: 'standalone',
+  pushing: false, dirty: false, cfg: null, status: null, addresses: [], lastErr: '',
+  async init() {
+    if (window.restoprime?.net) {
+      const r = await window.restoprime.net.get();
+      this.cfg = r.config; this.status = r.status; this.addresses = r.addresses;
+      this.mode = r.config.mode;
+      if (r.config.mode === 'server' && r.status.running) this.url = `http://127.0.0.1:${r.config.port}`;
+      else if (r.config.mode === 'client' && r.config.host) this.url = `http://${r.config.host}:${r.config.port}`;
+    } else if (/^https?:/.test(location.protocol)) {
+      this.mode = 'browser'; this.url = location.origin;
+    }
+    if (!this.url) { this.badge(); return; }
+    this.enabled = true;
+    await this.initialPull();
+    setInterval(() => this.poll(), 1500);
+  },
+  async fetch(p, opts = {}) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 6000);
+    try {
+      const r = await fetch(this.url + p, { ...opts, signal: ctl.signal, cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    } finally { clearTimeout(t); }
+  },
+  applyRemote(data, rev) {
+    this.rev = rev;
+    S = normalize(data);
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* ignore */ }
+    if (!$('#modal-root').innerHTML && !(current === 'pos' && document.activeElement?.matches('input,textarea,select'))) render();
+    else updateBadges();
+  },
+  async initialPull() {
+    try {
+      const st = await this.fetch('/api/state');
+      if (st.rev > 0 && st.data) this.applyRemote(st.data, st.rev);
+      else { this.rev = st.rev; await this.push(); } // الخادم فارغ: ارفع بيانات هذا الجهاز
+      this.setOnline(true);
+    } catch (e) {
+      this.setOnline(false, e);
+      toast('تعذّر الاتصال بخادم البيانات، يعمل التطبيق محلياً مؤقتاً', 'err');
+    }
+  },
+  async push() {
+    if (!this.enabled) return;
+    this.dirty = true;
+    if (this.pushing) return;
+    this.pushing = true;
+    try {
+      while (this.dirty) {
+        this.dirty = false;
+        try {
+          const r = await this.fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rev: this.rev, data: S }) });
+          this.rev = r.rev; this.setOnline(true);
+        } catch (e) { this.setOnline(false, e); this.dirty = true; break; }
+      }
+    } finally { this.pushing = false; }
+  },
+  async poll() {
+    if (!this.enabled || this.pushing) return;
+    try {
+      if (this.dirty) return this.push(); // إعادة محاولة رفع تغييرات معلّقة
+      const r = await this.fetch('/api/rev');
+      if (r.rev !== this.rev) {
+        const st = await this.fetch('/api/state');
+        if (st.data) this.applyRemote(st.data, st.rev);
+      }
+      this.setOnline(true);
+    } catch (e) { this.setOnline(false, e); }
+  },
+  setOnline(v, e) {
+    const changed = v !== this.online || !this.everSet;
+    this.everSet = true; this.online = v; this.lastErr = v ? '' : String(e?.message || e || '');
+    if (changed) { this.badge(); if (current === 'settings') render(); }
+  },
+  badge() {
+    const el = $('#net-status'); if (!el) return;
+    if (!this.enabled) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    const label = this.mode === 'server' ? 'خادم الشبكة' : this.mode === 'client' ? 'متصل بالخادم' : 'متصل';
+    el.className = 'net-status ' + (this.online ? 'on' : 'off');
+    el.textContent = this.online ? '● ' + label : '● غير متصل بالخادم';
+    el.title = this.online ? this.url : (this.lastErr || 'لا يمكن الوصول إلى الخادم');
+  },
+};
 
 const itemById = id => S.items.find(x => x.id === id);
 const catById = id => S.categories.find(x => x.id === id);
@@ -1361,13 +1451,14 @@ function renderSettings() {
     <div class="grid" style="align-content:start">
       <div class="card">
         <div class="card-head"><h2>النسخ الاحتياطي</h2></div>
-        <p class="muted small" style="margin-top:0">البيانات محفوظة في هذا المتصفح على هذا الجهاز فقط (الحجم الحالي ≈ ${fmtNum(usage, 0)} ك.ب).
+        <p class="muted small" style="margin-top:0">${Sync.enabled ? 'البيانات مشتركة عبر خادم الشبكة المحلية، مع نسخة محلية على هذا الجهاز' : 'البيانات محفوظة على هذا الجهاز فقط'} (الحجم الحالي ≈ ${fmtNum(usage, 0)} ك.ب).
           احفظ نسخة احتياطية بانتظام، خاصة قبل مسح بيانات المتصفح.</p>
         <div class="row wrap">
           <button class="btn primary" onclick="exportBackup()">⬇ تنزيل نسخة احتياطية</button>
           <label class="btn" style="color:var(--text);font-size:14px">⬆ استرجاع نسخة<input type="file" accept=".json,application/json" style="display:none" onchange="importBackup(this)"></label>
         </div>
       </div>
+      ${renderNetworkCard()}
       <div class="card">
         <div class="card-head"><h2>إدارة البيانات</h2></div>
         <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
@@ -1428,6 +1519,73 @@ function wipeAll() {
   }, 'حذف الكل');
 }
 
+/* ---------- الشبكة المحلية (الإعدادات) ---------- */
+const NET_MODE_DESC = {
+  standalone: 'البيانات محفوظة على هذا الجهاز فقط.',
+  server: 'هذا الجهاز يحتفظ بالبيانات ويشاركها مع بقية الأجهزة. يجب أن يبقى شغّالاً ليعمل الآخرون.',
+  client: 'هذا الجهاز يقرأ ويكتب البيانات من الجهاز الخادم.',
+};
+function renderNetworkCard() {
+  if (!window.restoprime?.net) {
+    return Sync.mode === 'browser' ? `<div class="card"><div class="card-head"><h2>🌐 الشبكة المحلية</h2></div>
+      <p class="muted small" style="margin:0">هذا الجهاز متصل بخادم RestoPrime عبر المتصفح (<code dir="ltr">${esc(Sync.url)}</code>). الحالة: <b>${Sync.online ? 'متصل' : 'غير متصل'}</b></p></div>` : '';
+  }
+  const cfg = Sync.cfg || { mode: 'standalone', port: 8787, host: '' };
+  const st = Sync.status || {};
+  const addrs = (Sync.addresses || []).map(a => a.address);
+  return `
+  <div class="card">
+    <div class="card-head"><h2>🌐 الشبكة المحلية</h2>${Sync.enabled ? `<span class="pill" style="background:${Sync.online ? 'var(--success-soft)' : 'var(--danger-soft)'}">${Sync.online ? 'متصل' : 'غير متصل'}</span>` : ''}</div>
+    <div class="form-grid">
+      <label class="full">وضع هذا الجهاز
+        <select id="n-mode" onchange="netModeChanged()">
+          <option value="standalone" ${cfg.mode === 'standalone' ? 'selected' : ''}>مستقل (بدون شبكة)</option>
+          <option value="server" ${cfg.mode === 'server' ? 'selected' : ''}>الخادم الرئيسي (يحتفظ بالبيانات)</option>
+          <option value="client" ${cfg.mode === 'client' ? 'selected' : ''}>جهاز فرعي (يتصل بالخادم)</option>
+        </select></label>
+      <label id="n-host-box" class="full" style="${cfg.mode === 'client' ? '' : 'display:none'}">عنوان IP الخادم<input id="n-host" value="${esc(cfg.host)}" placeholder="مثال: 192.168.1.10" dir="ltr"></label>
+      <label>المنفذ<input id="n-port" type="number" min="1024" max="65535" value="${cfg.port}" dir="ltr"></label>
+    </div>
+    <p class="muted small" id="n-desc">${NET_MODE_DESC[cfg.mode]}</p>
+    ${cfg.mode === 'server' ? (st.running
+      ? `<p class="small" style="margin:0 0 8px">الخادم يعمل ✅ — أدخل أحد هذه العناوين في الأجهزة الأخرى:<br>${addrs.length ? addrs.map(a => `<code dir="ltr" style="font-size:15px;font-weight:700">${a}</code>`).join(' &nbsp;|&nbsp; ') : '<i>لم يُعثر على اتصال شبكة</i>'}
+         <br><span class="muted">ويمكن أيضاً فتح التطبيق من متصفح أي جهاز أو هاتف على الشبكة عبر: <code dir="ltr">http://${addrs[0] || 'IP'}:${cfg.port}</code></span></p>`
+      : `<p class="small" style="color:var(--danger);margin:0 0 8px">الخادم لا يعمل: ${esc(st.error || 'أعد تشغيل البرنامج')}</p>`) : ''}
+    <div class="row wrap">
+      <button class="btn primary" onclick="saveNetwork()">💾 حفظ وإعادة تشغيل البرنامج</button>
+      <button class="btn" id="n-test-btn" onclick="testNetwork()" style="${cfg.mode === 'client' ? '' : 'display:none'}">🔌 اختبار الاتصال</button>
+      <span id="n-test" class="small"></span>
+    </div>
+  </div>`;
+}
+function netModeChanged() {
+  const m = $('#n-mode').value;
+  $('#n-host-box').style.display = m === 'client' ? '' : 'none';
+  $('#n-test-btn').style.display = m === 'client' ? '' : 'none';
+  $('#n-desc').textContent = NET_MODE_DESC[m];
+}
+async function testNetwork() {
+  const host = $('#n-host').value.trim(), port = $('#n-port').value;
+  const out = $('#n-test');
+  if (!host) return toast('أدخل عنوان IP الخادم', 'err');
+  out.textContent = 'جارٍ الاختبار…';
+  try {
+    const ctl = new AbortController(); setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch(`http://${host}:${port}/api/info`, { signal: ctl.signal, cache: 'no-store' });
+    const j = await r.json();
+    if (j.app !== 'RestoPrime') throw new Error('bad');
+    out.innerHTML = `<span style="color:var(--success)">✅ تم العثور على الخادم (الإصدار ${esc(j.version)}${j.hasData ? '، يحتوي بيانات' : '، فارغ'})</span>`;
+  } catch (e) {
+    out.innerHTML = '<span style="color:var(--danger)">❌ تعذّر الوصول إلى الخادم. تأكد من العنوان وأن الخادم شغّال وأن جدار الحماية يسمح بالمنفذ.</span>';
+  }
+}
+async function saveNetwork() {
+  const mode = $('#n-mode').value, host = $('#n-host').value.trim(), port = parseInt($('#n-port').value, 10) || 8787;
+  if (mode === 'client' && !host) return toast('أدخل عنوان IP الخادم', 'err');
+  await window.restoprime.net.set({ mode, host, port });
+  confirmBox('سيُعاد تشغيل البرنامج لتطبيق إعدادات الشبكة. متابعة؟', () => window.restoprime.net.relaunch(), 'إعادة التشغيل', false);
+}
+
 /* =========================================================
    التشغيل
    ========================================================= */
@@ -1447,6 +1605,7 @@ window.addEventListener('storage', e => {
 buildNav();
 window.addEventListener('hashchange', route);
 route();
+Sync.init();
 tickClock();
 setInterval(tickClock, 30000);
 setInterval(() => { if (current === 'kitchen' && !$('#modal-root').innerHTML) render(); }, 20000);

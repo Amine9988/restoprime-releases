@@ -352,3 +352,8 @@ table.tbl { width: 100%; border-collapse: collapse; }
   .kitchen, .cols-2, .cols-3, .side-layout { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* حالة الشبكة المحلية */
+.net-status { font-size: 13px; font-weight: 700; padding: 5px 10px; border-radius: 999px; }
+.net-status.on { color: var(--success); background: var(--success-soft); }
+.net-status.off { color: var(--danger); background: var(--danger-soft); }

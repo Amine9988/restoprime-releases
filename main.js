@@ -1,7 +1,9 @@
 'use strict';
-const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fs = require('fs');
+const { startServer, localAddresses } = require('./lan-server');
 
 // منع فتح أكثر من نسخة من التطبيق في نفس الوقت
 const gotLock = app.requestSingleInstanceLock();
@@ -9,6 +11,43 @@ if (!gotLock) {
   app.quit();
 } else {
   let win = null;
+  let lan = { running: false, error: null };
+
+  /* ---------- إعدادات الشبكة المحلية ---------- */
+  const DEFAULT_NET = { mode: 'standalone', port: 8787, host: '' }; // mode: standalone | server | client
+  const netFile = () => path.join(app.getPath('userData'), 'network.json');
+  function readNet() {
+    try { return { ...DEFAULT_NET, ...JSON.parse(fs.readFileSync(netFile(), 'utf8')) }; }
+    catch (e) { return { ...DEFAULT_NET }; }
+  }
+  function writeNet(cfg) {
+    const clean = {
+      mode: ['standalone', 'server', 'client'].includes(cfg.mode) ? cfg.mode : 'standalone',
+      port: Math.min(65535, Math.max(1024, parseInt(cfg.port, 10) || 8787)),
+      host: String(cfg.host || '').trim(),
+    };
+    fs.writeFileSync(netFile(), JSON.stringify(clean, null, 2));
+    return clean;
+  }
+
+  async function startLan(cfg) {
+    if (cfg.mode !== 'server') return;
+    try {
+      const r = await startServer({
+        port: cfg.port,
+        dataFile: path.join(app.getPath('userData'), 'shared-data.json'),
+        appDir: __dirname,
+        appVersion: app.getVersion(),
+      });
+      lan = { running: true, error: null, port: r.port, addresses: r.addresses };
+    } catch (e) {
+      lan = { running: false, error: e.code === 'EADDRINUSE' ? `المنفذ ${cfg.port} مستخدم من برنامج آخر` : String(e.message || e) };
+    }
+  }
+
+  ipcMain.handle('net:get', () => ({ config: readNet(), status: lan, addresses: localAddresses() }));
+  ipcMain.handle('net:set', (_e, cfg) => writeNet(cfg));
+  ipcMain.handle('net:relaunch', () => { app.relaunch(); app.exit(0); });
 
   function createWindow() {
     win = new BrowserWindow({
@@ -83,7 +122,8 @@ if (!gotLock) {
     if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    await startLan(readNet());
     createWindow();
     setupAutoUpdater();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

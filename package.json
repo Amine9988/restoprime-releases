@@ -22,6 +22,7 @@
     },
     "files": [
       "main.js",
+      "lan-server.js",
       "preload.js",
       "index.html",
       "app.js",
@@ -52,7 +53,8 @@
         "ar_SA",
         "en_US"
       ],
-      "language": "1025"
+      "language": "1025",
+      "include": "build/installer.nsh"
     },
     "publish": {
       "provider": "github",
