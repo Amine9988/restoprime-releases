@@ -1,7 +1,7 @@
 {
   "name": "restoprime",
   "productName": "RestoPrime",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "RestoPrime — نظام تسيير المطعم",
   "main": "main.js",
   "author": "RestoPrime",
