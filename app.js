@@ -1606,6 +1606,11 @@ buildNav();
 window.addEventListener('hashchange', route);
 route();
 Sync.init();
+window.restoprime?.trial?.().then((t) => {
+  const el = $('#trial-badge'); if (!t?.trial || !el) return;
+  el.style.display = ''; el.textContent = `نسخة تجريبية — ${t.daysLeft} يوم متبقٍ`;
+  if (t.daysLeft <= 3) el.className = 'net-status off';
+}).catch(() => {});
 tickClock();
 setInterval(tickClock, 30000);
 setInterval(() => { if (current === 'kitchen' && !$('#modal-root').innerHTML) render(); }, 20000);

@@ -11,7 +11,8 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win",
-    "release": "electron-builder --win --publish always"
+    "release": "electron-builder --win --publish always",
+    "dist:trial": "electron-builder --win --config electron-builder.trial.js --publish never"
   },
   "build": {
     "appId": "com.restoprime.app",
@@ -27,6 +28,7 @@
       "index.html",
       "app.js",
       "styles.css",
+      "trial-expired.html",
       "package.json",
       "node_modules/**/*"
     ],

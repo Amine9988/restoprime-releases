@@ -23,3 +23,10 @@
 set GH_TOKEN=ghp_xxxxxxxx     # توكن بصلاحية repo
 npm run release
 ```
+
+## النسخة التجريبية (15 يوماً)
+- كل وسم `vX.Y.Z` يبني تلقائياً **مثبّتين** ويرفعهما إلى نفس الـ Release:
+  - `RestoPrime-Setup-X.Y.Z.exe` (النسخة الأصلية، تحدّث من `latest.yml`)
+  - `RestoPrime-Trial-Setup-X.Y.Z.exe` (التجريبية، تحدّث من `trial.yml`)
+- التجريبية لها معرّف واسم مختلفان فيمكن تثبيتها بجانب الأصلية دون تعارض، وتنتهي بعد 15 يوماً من أول تشغيل.
+- لبنائها محلياً: `npm run dist:trial` (الناتج في `dist-trial/`).

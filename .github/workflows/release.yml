@@ -25,8 +25,11 @@ jobs:
       - name: Build installer
         run: npx electron-builder --win --publish never
 
+      - name: Build trial installer (15 days)
+        run: npx electron-builder --win --config electron-builder.trial.js --publish never
+
       - name: List build output
-        run: Get-ChildItem dist | Select-Object Name, Length
+        run: Get-ChildItem dist, dist-trial | Select-Object Name, Length
         shell: pwsh
 
       - name: Upload to GitHub Release
@@ -38,5 +41,8 @@ jobs:
             dist/*.exe
             dist/*.blockmap
             dist/latest.yml
+            dist-trial/*.exe
+            dist-trial/*.blockmap
+            dist-trial/trial.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>RestoPrime — تسيير المطعم</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap">
@@ -25,6 +25,7 @@
         <h1 id="page-title"></h1>
         <div class="topbar-left">
           <button class="btn primary" onclick="quickNewOrder()">＋ طلب جديد</button>
+          <span class="net-status on" id="trial-badge" style="display:none"></span>
           <span class="net-status" id="net-status" style="display:none"></span>
           <div class="clock" id="clock"></div>
         </div>

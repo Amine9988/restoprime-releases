@@ -5,6 +5,34 @@ const path = require('path');
 const fs = require('fs');
 const { startServer, localAddresses } = require('./lan-server');
 
+/* ---------- النسخة التجريبية (تُفعَّل عبر extraMetadata عند بناء نسخة Trial) ---------- */
+const PKG = require('./package.json');
+const IS_TRIAL = !!PKG.trial;
+const TRIAL_DAYS = PKG.trialDays || 15;
+const DAY = 24 * 60 * 60 * 1000;
+// نسخة احتياطية ثانية من تاريخ البداية خارج مجلد userData لصعوبة التحايل بحذفه
+const trialFiles = () => [
+  path.join(app.getPath('userData'), 'trial.json'),
+  path.join(process.env.PROGRAMDATA || app.getPath('appData'), 'RestoPrimeTrial', 'trial.json'),
+];
+function readTrialFile(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } }
+function trialStatus() {
+  if (!IS_TRIAL) return { trial: false };
+  const now = Date.now();
+  const saved = trialFiles().map(readTrialFile).filter((d) => d && Number.isFinite(d.start));
+  const start = saved.length ? Math.min(...saved.map((d) => d.start)) : now;
+  const lastSeen = saved.length ? Math.max(...saved.map((d) => d.lastSeen || d.start)) : now;
+  // رجوع الساعة إلى الوراء بأكثر من يوم = محاولة تحايل
+  const tampered = now < lastSeen - DAY;
+  const effectiveNow = Math.max(now, lastSeen);
+  const data = JSON.stringify({ start, lastSeen: effectiveNow });
+  for (const f of trialFiles()) {
+    try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, data); } catch (e) { /* ignore */ }
+  }
+  const daysLeft = Math.max(0, Math.ceil((start + TRIAL_DAYS * DAY - effectiveNow) / DAY));
+  return { trial: true, days: TRIAL_DAYS, daysLeft, expired: tampered || daysLeft <= 0, tampered };
+}
+
 // منع فتح أكثر من نسخة من التطبيق في نفس الوقت
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -12,6 +40,7 @@ if (!gotLock) {
 } else {
   let win = null;
   let lan = { running: false, error: null };
+  let trial = trialStatus();
 
   /* ---------- إعدادات الشبكة المحلية ---------- */
   const DEFAULT_NET = { mode: 'standalone', port: 8787, host: '' }; // mode: standalone | server | client
@@ -31,7 +60,7 @@ if (!gotLock) {
   }
 
   async function startLan(cfg) {
-    if (cfg.mode !== 'server') return;
+    if (cfg.mode !== 'server' || trial.expired) return;
     try {
       const r = await startServer({
         port: cfg.port,
@@ -47,6 +76,7 @@ if (!gotLock) {
 
   ipcMain.handle('net:get', () => ({ config: readNet(), status: lan, addresses: localAddresses() }));
   ipcMain.handle('net:set', (_e, cfg) => writeNet(cfg));
+  ipcMain.handle('trial:get', () => trial);
   ipcMain.handle('net:relaunch', () => { app.relaunch(); app.exit(0); });
 
   function createWindow() {
@@ -68,7 +98,7 @@ if (!gotLock) {
     });
 
     Menu.setApplicationMenu(null);
-    win.loadFile(path.join(__dirname, 'index.html'));
+    win.loadFile(path.join(__dirname, trial.expired ? 'trial-expired.html' : 'index.html'));
     win.once('ready-to-show', () => win.maximize());
 
     // فتح الروابط الخارجية في المتصفح بدل نافذة جديدة
@@ -84,6 +114,7 @@ if (!gotLock) {
   function setupAutoUpdater() {
     if (!app.isPackaged) return; // لا تحديثات أثناء التطوير
 
+    if (IS_TRIAL) autoUpdater.channel = 'trial'; // النسخة التجريبية تتحدّث من trial.yml
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.logger = null;
@@ -123,6 +154,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    trial = trialStatus();
     await startLan(readNet());
     createWindow();
     setupAutoUpdater();
